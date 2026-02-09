@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM 토큰 체감기 (소설 포맷)</title>
+    <style>
+        /* 기본 설정 */
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Malgun Gothic", sans-serif;
+            background-color: #f4f5f7;
+            color: #37352f;
+        }
+
+        /* 컨트롤 패널 */
+        .control-panel {
+            background: white;
+            padding: 16px 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            margin-bottom: 25px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+            border: 1px solid #eee;
+        }
+
+        .input-group {
+            flex: 1;
+            min-width: 140px;
+        }
+
+        .input-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: #555;
+            margin-bottom: 6px;
+        }
+
+        .input-group input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 15px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .input-group input:focus {
+            border-color: #888;
+        }
+
+        /* 채팅 컨테이너 */
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            padding-bottom: 40px;
+        }
+
+        /* 메시지 공통 */
+        .message {
+            max-width: 85%; /* 가독성을 위해 너비 늘림 */
+            padding: 16px 20px;
+            border-radius: 18px;
+            font-size: 15px;
+            line-height: 1.7; /* 줄간격 넓힘 */
+            position: relative;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            word-break: keep-all;
+        }
+
+        /* 왼쪽 (AI/소설) 스타일 */
+        .message.left {
+            align-self: flex-start;
+            background-color: white;
+            border-bottom-left-radius: 4px;
+            color: #222;
+        }
+        .message.left::before {
+            content: 'AI (출력)';
+            position: absolute;
+            top: -22px;
+            left: 5px;
+            font-size: 12px;
+            color: #999;
+            font-weight: 500;
+        }
+        
+        /* 소설/롤플레잉 본문 스타일 */
+        .novel-text p {
+            margin: 0 0 12px 0; /* 문단 간 간격 */
+        }
+        .novel-text p:last-child {
+            margin-bottom: 0;
+        }
+        .char-name {
+            font-weight: 700;
+            color: #4a4a4a;
+            margin-right: 4px;
+        }
+        .dialogue {
+            color: #111;
+        }
+
+        /* 오른쪽 (나/입력) 스타일 - 연한 회색 */
+        .message.right {
+            align-self: flex-end;
+            background-color: #E5E5EA;
+            border-bottom-right-radius: 4px;
+            color: #333;
+        }
+        .message.right::before {
+            content: '나 (입력)';
+            position: absolute;
+            top: -22px;
+            right: 5px;
+            font-size: 12px;
+            color: #999;
+            font-weight: 500;
+        }
+
+        /* 토큰 정보 */
+        .token-info {
+            font-size: 12px;
+            margin-top: 10px;
+            opacity: 0.5;
+            text-align: right;
+        }
+        .left .token-info { text-align: left; }
+    </style>
+</head>
+<body>
+
+    <div class="control-panel">
+        <div class="input-group">
+            <label>나 (입력) 토큰 수</label>
+            <input type="number" id="inputTokens" placeholder="예: 50" value="50" oninput="updateChat()">
+        </div>
+        <div class="input-group">
+            <label>AI (출력) 토큰 수</label>
+            <input type="number" id="outputTokens" placeholder="예: 300" value="400" oninput="updateChat()">
+        </div>
+    </div>
+
+    <div class="chat-container">
+        <div class="message right" id="inputBubble" style="display:none;">
+            <div id="inputText"></div>
+            <div class="token-info" id="inputInfo"></div>
+        </div>
+
+        <div class="message left" id="outputBubble" style="display:none;">
+            <div id="outputText" class="novel-text"></div>
+            <div class="token-info" id="outputInfo"></div>
+        </div>
+    </div>
+
+<script>
+    // 1. 배경 서술 (Narration) 데이터
+    const narrations = [
+        "방과 후, 교실은 이미 대부분 정리되어 고요했다.",
+        "창문 밖으로 붉게 물든 노을이 책상 위로 길게 그림자를 드리우고 있었다.",
+        "그는 문득 시계를 확인하고도 쉽게 자리에서 일어나지 못했다.",
+        "오늘도 완벽한 하루였지만, 마음 한구석은 정리되지 않은 채 남아 있었다.",
+        "차가운 공기가 폐부 깊숙이 들어왔다가 천천히 빠져나간다.",
+        "그녀는 펜을 내려놓고 창밖을 멍하니 응시했다.",
+        "어색한 침묵만이 두 사람 사이를 감돌고 있었다.",
+        "심장이 평소보다 조금 더 빠르게 뛰는 것이 느껴졌다.",
+        "복도 끝에서 발자국 소리가 들려왔다. 점점 더 가까워지는 소리.",
+        "먼지 쌓인 책장 사이로 오후의 햇살이 비스듬히 꽂혔다."
+    ];
+
+    // 2. 대사 (Dialogue) 데이터
+    const dialogues = [
+        { name: "한채린", text: "오늘… 잠깐만 이야기할 수 있을까?" },
+        { name: "강도현", text: "기다리고 있었어. 네가 올 때까지." },
+        { name: "한채린", text: "너한테만은… 내가 잘했는지 묻고 싶어." },
+        { name: "선생님", text: "거기 누구냐? 아직 하교 안 했니?" },
+        { name: "???", text: "이곳은 네가 알던 세계가 아니야." },
+        { name: "강도현", text: "설마, 지금까지 그 말을 믿었던 거야?" },
+        { name: "한채린", text: "다시 시작할 수 있다면, 우린 달라질 수 있을까." }
+    ];
+
+    // 텍스트 생성 로직 (HTML 포함)
+    function generateNovelText(tokenCount) {
+        if (!tokenCount || tokenCount <= 0) return "";
+
+        // 목표 글자 수 (토큰 * 0.7)
+        const targetLength = Math.floor(tokenCount * 0.7);
+        let currentText = "";
+        let currentLength = 0;
+        let htmlContent = "";
+
+        while (currentLength < targetLength) {
+            // 30% 확률로 대사, 70% 확률로 서술 선택
+            const isDialogue = Math.random() < 0.3;
+            
+            if (isDialogue) {
+                // 대사 추가
+                const pick = dialogues[Math.floor(Math.random() * dialogues.length)];
+                const lineHTML = `<p><span class="char-name">${pick.name} | </span> <span class="dialogue">"${pick.text}"</span></p>`;
+                const lineText = pick.name + pick.text; // 길이 계산용
+                
+                htmlContent += lineHTML;
+                currentLength += lineText.length;
+            } else {
+                // 서술 추가
+                const pick = narrations[Math.floor(Math.random() * narrations.length)];
+                // 서술은 문단 나눔을 위해 p 태그 사용, 가끔 두 문장 합치기
+                const lineHTML = `<p>${pick}</p>`;
+                
+                htmlContent += lineHTML;
+                currentLength += pick.length;
+            }
+
+            // 너무 길어지면 중단
+            if (currentLength >= targetLength) break;
+        }
+
+        return htmlContent;
+    }
+
+    // 입력창용 일반 텍스트 생성기
+    function generatePlainText(tokenCount) {
+        if (!tokenCount || tokenCount <= 0) return "";
+        const targetLength = Math.floor(tokenCount * 0.7);
+        let result = "";
+        const seeds = ["프롬프트를 작성합니다. ", "이것은 입력 예시입니다. ", "토큰 수를 확인하고 있습니다. ", "질문을 입력하는 구간입니다. "];
+        
+        while (result.length < targetLength) {
+            result += seeds[Math.floor(Math.random() * seeds.length)];
+        }
+        return result.substring(0, targetLength) + "...";
+    }
+
+    function updateChat() {
+        const inputVal = parseInt(document.getElementById('inputTokens').value) || 0;
+        const outputVal = parseInt(document.getElementById('outputTokens').value) || 0;
+
+        // 오른쪽 (입력) 업데이트
+        if (inputVal > 0) {
+            const inputText = generatePlainText(inputVal);
+            document.getElementById('inputText').innerText = inputText;
+            document.getElementById('inputInfo').innerText = `${inputVal.toLocaleString()} Tokens (약 ${inputText.length}자)`;
+            document.getElementById('inputBubble').style.display = 'block';
+        } else {
+            document.getElementById('inputBubble').style.display = 'none';
+        }
+        
+        // 왼쪽 (출력 - 소설 포맷) 업데이트
+        if (outputVal > 0) {
+            // innerHTML을 사용하여 태그 적용
+            const outputHtml = generateNovelText(outputVal);
+            document.getElementById('outputText').innerHTML = outputHtml;
+            
+            // 태그를 제외한 순수 텍스트 길이 계산 (근사치)
+            const textLength = outputHtml.replace(/<[^>]*>/g, '').length;
+            document.getElementById('outputInfo').innerText = `${outputVal.toLocaleString()} Tokens (약 ${textLength}자)`;
+            document.getElementById('outputBubble').style.display = 'block';
+        } else {
+            document.getElementById('outputBubble').style.display = 'none';
+        }
+    }
+
+    window.onload = updateChat;
+</script>
+
+</body>
+</html>
